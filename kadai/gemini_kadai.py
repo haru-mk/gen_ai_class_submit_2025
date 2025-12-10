@@ -2,6 +2,7 @@
 import os  # 環境変数にアクセスするために使用
 import sqlite3  # SQLiteデータベース操作のために使用
 from datetime import datetime  # タイムスタンプのために使用
+import time  # スリープ用
 import streamlit as st  # Streamlit UIフレームワーク
 from google import genai  # Google GenAI APIのメインモジュール
 from google.genai import types  # APIリクエストとレスポンスの型定義
@@ -23,6 +24,24 @@ model = "gemini-flash-lite-latest"
 # データベースファイルのパス
 # このスクリプトと同じディレクトリにgame_suggestions.dbを作成
 db_path = os.path.join(os.path.dirname(__file__), "game_suggestions.db")
+
+
+def safe_rerun():
+    """Streamlit の再実行を安全に行う（存在すれば呼び出す）。
+
+    `st.experimental_rerun` が存在しない環境でも AttributeError を出さないようにする。
+    最終手段としてセッションステートのトリガーをトグルして間接的に再描画を促す。
+    """
+    rerun_func = getattr(st, "experimental_rerun", None)
+    if callable(rerun_func):
+        try:
+            rerun_func()
+            return
+        except Exception:
+            pass
+
+    # フォールバック: セッションステートの値を反転して UI を更新させる
+    st.session_state["_rerun_trigger"] = not st.session_state.get("_rerun_trigger", False)
 
 
 def init_database():
@@ -178,13 +197,6 @@ if st.button("ゲームを提案してもらう"):
             
             st.write(f"{i}. **{game}**")
             
-            # ゲーム画像をiframeで表示
-            image_html = f"""
-            <iframe src="https://www.google.com/search?q={game.replace(' ', '+')}+game&tbm=isch" 
-                    style="width:100%; height:400px; border:none; border-radius:8px;"></iframe>
-            """
-            st.markdown(image_html, unsafe_allow_html=True)
-            
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.write(f"[🔗 Steamで検索]({steam_url})")
@@ -199,14 +211,52 @@ if st.button("ゲームを提案してもらう"):
 
 # 提案履歴一覧
 st.subheader("📋 提案履歴")
+
+if 'confirm_delete_all' not in st.session_state:
+    st.session_state['confirm_delete_all'] = False
+
 conn = sqlite3.connect(db_path)
-rows = conn.execute("SELECT mood, opinion, suggested_game, created_at FROM game_suggestions ORDER BY created_at DESC").fetchall()
+rows = conn.execute("SELECT id, mood, opinion, suggested_game, created_at FROM game_suggestions ORDER BY created_at DESC").fetchall()
 conn.close()
 
+col_l, col_r = st.columns([3, 1])
+with col_r:
+    if st.button("🗑️ すべて削除", key="delete_all_btn"):
+        st.session_state['confirm_delete_all'] = True
+
+if st.session_state['confirm_delete_all']:
+    st.warning("本当にすべての提案履歴を削除しますか？この操作は取り消せません。")
+    if st.button("削除を確定する", key="confirm_delete_all_confirm"):
+        conn = sqlite3.connect(db_path)
+        conn.execute("DELETE FROM game_suggestions")
+        conn.commit()
+        conn.close()
+        st.session_state['confirm_delete_all'] = False
+        safe_rerun()
+
 if rows:
-    for mood_hist, opinion_hist, game, created_at in rows:
+    for row in rows:
+        row_id, mood_hist, opinion_hist, game, created_at = row
         with st.expander(f"🎯 {game} ({created_at})"):
             st.write(f"**気分:** {mood_hist}")
             st.write(f"**意見:** {opinion_hist}")
+
+            col_del, col_spacer = st.columns([1, 4])
+            with col_del:
+                confirm_key = f"confirm_delete_{row_id}"
+                if not st.session_state.get(confirm_key, False):
+                    if st.button("削除", key=f"delete_{row_id}"):
+                        st.session_state[confirm_key] = True
+                else:
+                    st.warning("本当にこの提案を削除しますか？この操作は取り消せません。")
+                    if st.button("削除を確定する", key=f"confirm_{row_id}"):
+                        conn = sqlite3.connect(db_path)
+                        conn.execute("DELETE FROM game_suggestions WHERE id = ?", (row_id,))
+                        conn.commit()
+                        conn.close()
+                        st.session_state[confirm_key] = False
+                        safe_rerun()
+                    if st.button("キャンセル", key=f"cancel_{row_id}"):
+                        st.session_state[confirm_key] = False
 else:
     st.info("まだ提案履歴がありません")
