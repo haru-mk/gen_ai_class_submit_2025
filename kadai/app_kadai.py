@@ -6,7 +6,65 @@ import streamlit as st
 from google import genai
 
 # ページ設定
-st.title("🎮 ゲーム提案 AI")
+st.set_page_config(page_title="ゲーム提案 AI", page_icon="🎮", layout="wide")
+
+# カスタムCSS（フォントはそのまま、色・カード・ボタンをゲーム風に調整）
+st.markdown(
+    """
+    <style>
+    /* 背景 */
+    .reportview-container, .main, .block-container {
+        background: linear-gradient(180deg, #0f1724 0%, #0b1020 60%);
+        color: #e6eef8;
+    }
+    /* ヘッダー */
+    .header {
+        display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+    }
+    .header .title { font-size: 34px; font-weight: 700; color: #ffd166; }
+    .header .subtitle { color: #cfe8ff; opacity: 0.9; }
+
+    /* ゲームカード */
+    .game-card {
+        background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 12px;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.6), inset 0 -2px 6px rgba(0,0,0,0.2);
+    }
+    .game-rank { width:36px; height:36px; border-radius:8px; background:#ff7f50; display:flex; align-items:center; justify-content:center; font-weight:700; color:#081123; }
+    .game-name { font-size:18px; font-weight:700; color:#fff; }
+    .game-desc { color:#d7e9ff; margin-top:6px; font-size:13px; }
+    .game-links { margin-top:10px; }
+    .link-btn {
+        display:inline-block; padding:6px 10px; margin-right:8px; border-radius:8px; text-decoration:none; color:#071427; background:#ffd166;
+        font-weight:600; font-size:13px;
+    }
+    .link-btn.secondary { background:#7dd3fc; color:#02293a; }
+    .link-btn.tertiary { background:#a78bfa; color:#1b0b3a; }
+
+    /* ボタン系の微調整（Streamlitの内部ボタン） */
+    div.stButton > button {
+        background: linear-gradient(180deg,#ffd166,#ffb84d) !important; color:#081123; font-weight:700; border: none; box-shadow: none;
+    }
+
+    /* 履歴のexpander内 */
+    .stExpanderHeader { color:#ffd166; }
+    /* 入力ラベル（テキスト入力・テキストエリアのラベル）を白にする */
+    .stTextInput label, .stTextArea label, .stTextInput > label, .stTextArea > label, label[for] {
+        color: #ffffff !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# カスタムヘッダー（タイトルの見た目をゲーム風に）
+st.markdown('<div class="header">🎮 <div><div class="title">ゲーム提案 AI</div><div class="subtitle">あなたの気分にあったゲームを提案します</div></div></div>', unsafe_allow_html=True)
 
 # データベースパス
 db_path = os.path.join(os.path.dirname(__file__), "game_history.db")
@@ -123,19 +181,24 @@ if st.button("ゲームを提案してもらう"):
             official_url = f"https://www.google.com/search?q={game.replace(' ', '+')}+official+website"
             youtube_url = f"https://www.youtube.com/results?search_query={game.replace(' ', '+')}+official+trailer"
 
-            st.write(f"{i}. **{game}**")
-            # 一言説明を表示（存在すれば）
-            if i-1 < len(descriptions):
-                st.write(f"*{descriptions[i-1]}*")
+            # カード表示（HTMLを使って見た目を調整）
+            desc = descriptions[i-1] if i-1 < len(descriptions) else '説明なし'
+            card_html = f'''
+            <div class="game-card">
+              <div class="game-rank">{i}</div>
+              <div style="flex:1">
+                <div class="game-name">{game}</div>
+                <div class="game-desc">{desc}</div>
+                <div class="game-links">
+                  <a class="link-btn" href="{steam_url}" target="_blank">🔗 Steam</a>
+                  <a class="link-btn secondary" href="{official_url}" target="_blank">🌐 公式</a>
+                  <a class="link-btn tertiary" href="{youtube_url}" target="_blank">▶️ YouTube</a>
+                </div>
+              </div>
+            </div>
+            '''
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write(f"[🔗 Steamで検索]({steam_url})")
-            with col2:
-                st.write(f"[🌐 公式サイト]({official_url})")
-            with col3:
-                st.write(f"[▶️ YouTubeで検索]({youtube_url})")
-
+            st.markdown(card_html, unsafe_allow_html=True)
             st.divider()
     else:
         st.warning("気分または意見のいずれかを入力してください")
