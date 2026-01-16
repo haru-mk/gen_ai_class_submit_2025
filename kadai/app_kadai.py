@@ -95,18 +95,47 @@ client = get_client()
 model = "gemini-flash-lite-latest"
 
 
-def generate_one_line_descriptions(titles):
-    """Given a list of titles, ask the model to return one-line descriptions in the same order.
+def generate_one_line_descriptions(titles, mood="", opinion=""):
+    """Given a list of titles and optional mood/opinion, return descriptions in the same order.
+    If mood/opinion are provided, include how the game matches them in the description.
     Returns a list of descriptions (same length as titles, padded with '説明なし' if missing).
     """
     if not titles:
         return []
 
-    prompt = (
-        "以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。"
-        " タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。\n\n"
-        + "\n".join(titles)
-    )
+    if mood or opinion:
+        context = ""
+        if mood and opinion:
+            context = (
+                f"ユーザーの気分：{mood}\n"
+                f"ユーザーの好み：{opinion}\n\n"
+                "以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。"
+                "説明には、このゲームがなぜユーザーの気分と好みに合っているのかを含めてください。"
+            )
+        elif mood:
+            context = (
+                f"ユーザーの気分：{mood}\n\n"
+                "以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。"
+                "説明には、このゲームがなぜユーザーの気分に合っているのかを含めてください。"
+            )
+        else:
+            context = (
+                f"ユーザーの好み：{opinion}\n\n"
+                "以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。"
+                "説明には、このゲームがなぜユーザーの好みに合っているのかを含めてください。"
+            )
+        
+        prompt = (
+            context
+            + " タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。\n\n"
+            + "\n".join(titles)
+        )
+    else:
+        prompt = (
+            "以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。"
+            " タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。\n\n"
+            + "\n".join(titles)
+        )
 
     try:
         resp = client.models.generate_content(model=model, contents=prompt)
@@ -122,11 +151,22 @@ def generate_one_line_descriptions(titles):
 
 
 # 気分と意見を入力
-st.subheader("あなたの気分や意見を教えてください")
-mood = st.text_input("現在の気分は？ (例: 疲れている、興奮している、リラックスしたい)")
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("あなたの気分や意見を教えてください")
+with col2:
+    st.caption("💡 どちらか片方を入力しても提案可能です")
+
+mood = st.text_input("現在の気分は？ (例: 刺激が欲しい、興奮している、リラックスしたい)")
 opinion = st.text_area("ゲームに関する意見やジャンルの好み (例: アクション好き、ストーリー重視、短時間プレイ)", height=100)
 
-if st.button("ゲームを提案してもらう"):
+col_btn, col_info = st.columns([1, 4])
+with col_btn:
+    submit_button = st.button("ゲームを提案してもらう")
+with col_info:
+    st.caption("⚠️ 提案するゲームによってはSteamで販売されていないゲームが該当される場合もあります")
+
+if submit_button:
     if mood or opinion:
         # 入力に応じてプロンプトのユーザー情報部分を組み立てる
         user_state_section = "【ユーザーの状態】\n"
@@ -144,16 +184,18 @@ if st.button("ゲームを提案してもらう"):
         # Geminiでゲーム提案（複数取得）
         response = client.models.generate_content(
             model=model,
-            contents=f"""以下のユーザーの気分と意見を詳しく分析して、最も適切なゲームタイトルを10個提案してください。
+            contents=f"""以下のユーザーの気分と意見を詳しく分析して、最も適切なゲームタイトルを20個提案してください。
 
 {user_state_section}{prefs_section}
 
 【提案の条件】
-1. 必ず実在する有名なゲームのみを提案してください
+1. 実在するゲームのみを提案してください
 2. 架空のゲームは絶対に含めないでください
-3. ユーザーの気分と意見を最大限に考慮してください
-4. 各タイトルは改行で区切ってください
-5. ゲームタイトルのみを出力してください（説明は不要）"""
+3. 有名なゲームだけでなく、比較的知られていないが高い評価を受けているゲームも含めてください
+4. 新作から懐かしい作品まで、様々な時期のゲームを提案してください
+5. ユーザーの気分と意見を最大限に考慮してください
+6. 各タイトルは改行で区切ってください
+7. ゲームタイトルのみを出力してください（説明は不要）"""
         )
         suggested_games = response.text.strip().split('\n')
         # 空行を削除
@@ -161,7 +203,7 @@ if st.button("ゲームを提案してもらう"):
 
         # 各ゲームの一言説明を生成
         try:
-            descriptions = generate_one_line_descriptions(suggested_games)
+            descriptions = generate_one_line_descriptions(suggested_games, mood, opinion)
         except Exception:
             descriptions = ["説明なし"] * len(suggested_games)
 
@@ -175,7 +217,7 @@ if st.button("ゲームを提案してもらう"):
         conn.commit()
         conn.close()
 
-        st.success("✨ おすすめゲーム（10件）:")
+        st.success("✨ おすすめゲーム（20件）:")
         for i, game in enumerate(suggested_games, 1):
             steam_url = f"https://store.steampowered.com/search/?term={game.replace(' ', '+')}"
             official_url = f"https://www.google.com/search?q={game.replace(' ', '+')}+official+website"
@@ -204,27 +246,19 @@ if st.button("ゲームを提案してもらう"):
         st.warning("気分または意見のいずれかを入力してください")
 
 # 提案履歴一覧
-st.subheader("📋 提案履歴")
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("📋 提案履歴")
+with col2:
+    st.caption("🗑️ 削除ボタンはダブルクリックで利用できます")
 
 conn = sqlite3.connect(db_path)
 rows = conn.execute("SELECT id, mood, opinion, suggested_game, created_at FROM game_suggestions ORDER BY created_at DESC").fetchall()
 conn.close()
 
-if rows:
-    for row in rows:
-        row_id, mood, opinion, game, created_at = row
-        with st.expander(f"🎯 {game} ({created_at})"):
-            st.write(f"**気分:** {mood}")
-            st.write(f"**意見:** {opinion}")
-
-            # リンクの生成
-            steam_url = f"https://store.steampowered.com/search/?term={game.replace(' ', '+')}"
-            official_url = f"https://www.google.com/search?q={game.replace(' ', '+')}+official+website"
-            youtube_url = f"https://www.youtube.com/results?search_query={game.replace(' ', '+')}+official+trailer"
-
-            st.markdown(f"[🔗 Steam]({steam_url}) | [🌐 公式]({official_url}) | [▶️ YouTube]({youtube_url})")
-else:
-    st.info("まだ提案履歴がありません")
+# セッション状態の初期化
+if 'confirm_delete_all' not in st.session_state:
+    st.session_state['confirm_delete_all'] = False
 
 col_l, col_r = st.columns([3, 1])
 with col_r:
@@ -253,6 +287,13 @@ if rows:
         with st.expander(f"🎯 {game} ({created_at})"):
             st.write(f"**気分:** {mood}")
             st.write(f"**意見:** {opinion}")
+
+            # リンクの生成
+            steam_url = f"https://store.steampowered.com/search/?term={game.replace(' ', '+')}"
+            official_url = f"https://www.google.com/search?q={game.replace(' ', '+')}+official+website"
+            youtube_url = f"https://www.youtube.com/results?search_query={game.replace(' ', '+')}+official+trailer"
+
+            st.markdown(f"[🔗 Steam]({steam_url}) | [🌐 公式]({official_url}) | [▶️ YouTube]({youtube_url})")
 
             col_del, col_spacer = st.columns([1, 4])
             with col_del:

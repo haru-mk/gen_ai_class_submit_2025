@@ -136,7 +136,15 @@ def generate_game_suggestion(mood: str, opinion: str) -> str:
             role="user",  # メッセージの送信者（ユーザー）を指定
             parts=[
                 # Part.from_text()でテキスト形式のメッセージを作成
-                types.Part.from_text(text=f"""以下の気分と意見に基づいて、実際に存在する人気のゲームタイトルを5つ提案してください。必ず実在するゲームのみを提案し、架空のゲームは絶対に含めないでください。各タイトルは改行で区切って、ゲームタイトルのみを出力してください。
+                types.Part.from_text(text=f"""以下の気分と意見に基づいて、実際に存在するゲームタイトルを20個提案してください。
+
+【提案の条件】
+1. 実在するゲームのみを提案してください
+2. 架空のゲームは絶対に含めないでください
+3. 有名なゲームだけでなく、比較的知られていないが高い評価を受けているゲームも含めてください
+4. 新作から懐かしい作品まで、様々な時期のゲームを提案してください
+5. 各タイトルは改行で区切ってください
+6. ゲームタイトルのみを出力してください（説明は不要）
 
 気分: {mood}
 意見: {opinion}"""),
@@ -159,6 +167,81 @@ def generate_game_suggestion(mood: str, opinion: str) -> str:
     return response.text
 
 
+def generate_game_descriptions(titles: list, mood: str = "", opinion: str = "") -> list:
+    """
+    Gemini APIを使用してゲームの説明を生成する関数
+    気分や意見が入力されている場合、説明にそれらとの関連性を含める
+    
+    Args:
+        titles: ゲームタイトルのリスト
+        mood: ユーザーの気分（オプション）
+        opinion: ユーザーの好み（オプション）
+    
+    Returns:
+        各ゲームの説明リスト
+    """
+    if not titles:
+        return []
+    
+    if mood or opinion:
+        if mood and opinion:
+            context = f"""ユーザーの気分：{mood}
+ユーザーの好み：{opinion}
+
+以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。
+説明には、このゲームがなぜユーザーの気分と好みに合っているのかを含めてください。
+タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。
+
+{chr(10).join(titles)}"""
+        elif mood:
+            context = f"""ユーザーの気分：{mood}
+
+以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。
+説明には、このゲームがなぜユーザーの気分に合っているのかを含めてください。
+タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。
+
+{chr(10).join(titles)}"""
+        else:
+            context = f"""ユーザーの好み：{opinion}
+
+以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。
+説明には、このゲームがなぜユーザーの好みに合っているのかを含めてください。
+タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。
+
+{chr(10).join(titles)}"""
+        prompt_text = context
+    else:
+        prompt_text = f"""以下のゲームタイトルについて、それぞれ1行で簡潔に説明してください。
+タイトルは出力せず、タイトルの順に対応する説明だけを改行区切りで出力してください。
+
+{chr(10).join(titles)}"""
+    
+    contents = [
+        types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text=prompt_text),
+            ],
+        ),
+    ]
+    
+    generate_content_config = types.GenerateContentConfig()
+    
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=generate_content_config,
+    )
+    
+    lines = [l.strip() for l in response.text.strip().split('\n') if l.strip()]
+    
+    # 必要なら不足分を埋める
+    if len(lines) < len(titles):
+        lines += ["説明なし"] * (len(titles) - len(lines))
+    
+    return lines
+
+
 # データベースを初期化
 init_database()
 
@@ -166,11 +249,22 @@ init_database()
 st.title("🎮 ゲーム提案 AI")
 
 # 気分と意見を入力
-st.subheader("あなたの気分や意見を教えてください")
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("あなたの気分や意見を教えてください")
+with col2:
+    st.caption("💡 どちらか片方を入力しても提案可能です")
+
 mood = st.text_input("現在の気分は？ (例: 疲れている、興奮している、リラックスしたい)")
 opinion = st.text_area("ゲームに関する意見やジャンルの好み (例: アクション好き、ストーリー重視、短時間プレイ)", height=100)
 
-if st.button("ゲームを提案してもらう"):
+col_btn, col_info = st.columns([1, 4])
+with col_btn:
+    submit_button = st.button("ゲームを提案してもらう")
+with col_info:
+    st.caption("⚠️ 提案するゲームによってはSteamで販売されていないゲームが該当される場合もあります")
+
+if submit_button:
     if mood and opinion:
         # ゲーム提案を生成
         with st.spinner("提案を生成中..."):
@@ -178,6 +272,9 @@ if st.button("ゲームを提案してもらう"):
             suggested_games = suggested_games_text.strip().split('\n')
             # 空行を削除
             suggested_games = [game.strip() for game in suggested_games if game.strip()]
+            
+            # ゲームの説明を生成（気分と意見の両方に基づく）
+            descriptions = generate_game_descriptions(suggested_games, mood, opinion)
         
         # DBに保存（複数のゲーム）
         conn = sqlite3.connect(db_path)
@@ -196,6 +293,8 @@ if st.button("ゲームを提案してもらう"):
             youtube_url = f"https://www.youtube.com/results?search_query={game.replace(' ', '+')}+official+trailer"
             
             st.write(f"{i}. **{game}**")
+            desc = descriptions[i-1] if i-1 < len(descriptions) else "説明なし"
+            st.write(f"*{desc}*")
             
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -210,7 +309,11 @@ if st.button("ゲームを提案してもらう"):
         st.warning("気分と意見の両方を入力してください")
 
 # 提案履歴一覧
-st.subheader("📋 提案履歴")
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.subheader("📋 提案履歴")
+with col2:
+    st.caption("🗑️ 削除ボタンはダブルクリックで利用できます")
 
 if 'confirm_delete_all' not in st.session_state:
     st.session_state['confirm_delete_all'] = False
@@ -240,6 +343,13 @@ if rows:
         with st.expander(f"🎯 {game} ({created_at})"):
             st.write(f"**気分:** {mood_hist}")
             st.write(f"**意見:** {opinion_hist}")
+
+            # リンクの生成
+            steam_url = f"https://store.steampowered.com/search/?term={game.replace(' ', '+')}"
+            official_url = f"https://www.google.com/search?q={game.replace(' ', '+')}+official+website"
+            youtube_url = f"https://www.youtube.com/results?search_query={game.replace(' ', '+')}+official+trailer"
+
+            st.markdown(f"[🔗 Steam]({steam_url}) | [🌐 公式]({official_url}) | [▶️ YouTube]({youtube_url})")
 
             col_del, col_spacer = st.columns([1, 4])
             with col_del:
