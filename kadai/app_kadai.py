@@ -206,12 +206,25 @@ if st.button("ゲームを提案してもらう"):
 # 提案履歴一覧
 st.subheader("📋 提案履歴")
 
-if 'confirm_delete_all' not in st.session_state:
-    st.session_state['confirm_delete_all'] = False
-
 conn = sqlite3.connect(db_path)
 rows = conn.execute("SELECT id, mood, opinion, suggested_game, created_at FROM game_suggestions ORDER BY created_at DESC").fetchall()
 conn.close()
+
+if rows:
+    for row in rows:
+        row_id, mood, opinion, game, created_at = row
+        with st.expander(f"🎯 {game} ({created_at})"):
+            st.write(f"**気分:** {mood}")
+            st.write(f"**意見:** {opinion}")
+
+            # リンクの生成
+            steam_url = f"https://store.steampowered.com/search/?term={game.replace(' ', '+')}"
+            official_url = f"https://www.google.com/search?q={game.replace(' ', '+')}+official+website"
+            youtube_url = f"https://www.youtube.com/results?search_query={game.replace(' ', '+')}+official+trailer"
+
+            st.markdown(f"[🔗 Steam]({steam_url}) | [🌐 公式]({official_url}) | [▶️ YouTube]({youtube_url})")
+else:
+    st.info("まだ提案履歴がありません")
 
 col_l, col_r = st.columns([3, 1])
 with col_r:
